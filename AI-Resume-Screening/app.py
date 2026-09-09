@@ -915,7 +915,7 @@ def extract_resume_text(pdf_file):
 # A candidate is shortlisted at 50% or above.
 # This avoids rejecting candidates who match most of the required skills
 # but use different wording in their resume.
-SELECTION_THRESHOLD = 50
+SELECTION_THRESHOLD = 65
 
 
 def calculate_match(resume_text, job_text):
