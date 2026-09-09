@@ -912,6 +912,12 @@ def extract_resume_text(pdf_file):
 # AI MATCHING
 # =========================================================
 
+# A candidate is shortlisted at 50% or above.
+# This avoids rejecting candidates who match most of the required skills
+# but use different wording in their resume.
+SELECTION_THRESHOLD = 50
+
+
 def calculate_match(resume_text, job_text):
 
     resume_lower = resume_text.lower()
@@ -1015,10 +1021,12 @@ def calculate_match(resume_text, job_text):
 
     if len(required_skills) > 0:
 
+        # Skill-first scoring:
+        # Actual required skills are more important than wording similarity.
         final_score = (
-            (skill_score * 0.70)
+            (skill_score * 0.85)
             +
-            (tfidf_similarity * 0.30)
+            (tfidf_similarity * 0.15)
         )
 
     else:
@@ -1181,7 +1189,7 @@ if analyze:
 
                 score = candidate["score"]
 
-                if score >= 60:
+                if score >= SELECTION_THRESHOLD:
                     status = "SELECTED"
                     status_icon = "🟢"
                 else:
@@ -1237,7 +1245,7 @@ if analyze:
                 skill_score = candidate["skill_score"]
                 tfidf_score = candidate["tfidf_score"]
 
-                if score >= 60:
+                if score >= SELECTION_THRESHOLD:
                     status = "SELECTED"
                     status_icon = "🟢"
                 else:
