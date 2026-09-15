@@ -850,8 +850,8 @@ with left:
     )
 
     if uploaded_files:
-        if len(uploaded_files) > 3:
-            st.warning("Please upload a maximum of 3 resumes at a time.")
+        if len(uploaded_files) > 10:
+            st.warning("Please upload a maximum of 10 resumes at a time.")
         else:
             st.success(f"✓ {len(uploaded_files)} resume(s) uploaded")
 
