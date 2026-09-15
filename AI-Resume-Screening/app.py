@@ -846,7 +846,7 @@ with left:
         type=["pdf"],
         accept_multiple_files=True,
         label_visibility="collapsed",
-        help="Upload up to 3 candidate resumes in PDF format."
+        help="Upload up to 10 candidate resumes in PDF format."
     )
 
     if uploaded_files:
@@ -1073,10 +1073,10 @@ if analyze:
             "Please upload at least one resume first."
         )
 
-    elif len(uploaded_files) > 3:
+    elif len(uploaded_files) > 10:
 
         st.warning(
-            "Please upload a maximum of 3 resumes at a time."
+            "Please upload a maximum of 10 resumes at a time."
         )
 
     elif not job_description.strip():
