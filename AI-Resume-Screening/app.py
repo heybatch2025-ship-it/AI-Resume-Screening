@@ -179,6 +179,113 @@ st.markdown("""
     border: 1px dashed rgba(139,92,246,0.65) !important;
     border-radius: 18px !important;
 }
+/* RESUME VISUAL */
+
+.resume-visual {
+    height: 155px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    margin-top: 5px;
+}
+
+.resume-card-3d {
+    width: 145px;
+    height: 105px;
+    border-radius: 14px;
+    background: linear-gradient(145deg, #263bff, #713cff, #151b61);
+    border: 2px solid #55dfff;
+    box-shadow:
+        0 0 25px #514cff,
+        0 0 50px rgba(90,70,255,0.35);
+    position: relative;
+}
+
+.resume-card-3d::before {
+    content: "RESUME";
+    position: absolute;
+    top: 25px;
+    left: 20px;
+    color: white;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.resume-card-3d::after {
+    content: "PDF";
+    position: absolute;
+    right: -18px;
+    bottom: -12px;
+    background: linear-gradient(135deg, #ff3d91, #7d4cff);
+    color: white;
+    font-weight: 800;
+    padding: 8px 12px;
+    border-radius: 8px;
+    box-shadow: 0 0 18px #ff3d91;
+}
+
+.upload-cloud {
+    position: absolute;
+    right: 24%;
+    top: 12px;
+    font-size: 42px;
+    filter: drop-shadow(0 0 12px #54dfff);
+}
+
+/* JOB REQUIREMENTS VISUAL */
+
+.job-visual {
+    height: 155px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    margin-top: 5px;
+}
+
+.job-board {
+    width: 150px;
+    height: 110px;
+    border-radius: 14px;
+    background: linear-gradient(145deg, #182b70, #5130a8, #10183f);
+    border: 2px solid #66eaff;
+    box-shadow:
+        0 0 25px #514cff,
+        0 0 50px rgba(90,70,255,0.35);
+    position: relative;
+    padding: 18px;
+    box-sizing: border-box;
+}
+
+.job-board::before {
+    content: "JOB";
+    position: absolute;
+    top: 15px;
+    left: 20px;
+    color: white;
+    font-size: 18px;
+    font-weight: 800;
+}
+
+.job-board::after {
+    content: "✓  Python     ✓  SQL     ✓  ML";
+    white-space: pre;
+    position: absolute;
+    left: 20px;
+    top: 48px;
+    color: #8be9ff;
+    font-size: 9px;
+    line-height: 20px;
+}
+
+.job-icon {
+    position: absolute;
+    right: 18%;
+    top: 8px;
+    font-size: 43px;
+    filter: drop-shadow(0 0 13px #9d5cff);
+}
 
 /* TEXT AREA */
 
@@ -638,31 +745,37 @@ textarea {
 }
 
 .cube-one {
-    left: 26%;
-    top: 7%;
+    left: 8%;
+    top: 18%;
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
 }
-
 .cube-two {
-    right: 18%;
-    top: 4%;
-    width: 15px;
-    height: 15px;
+    right: 8%;
+    top: 20%;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
     animation-delay: 1s;
 }
 
+
 .cube-three {
-    left: 1%;
-    bottom: 8%;
-    width: 35px;
-    height: 35px;
+    left: 4%;
+    bottom: 12%;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
     animation-delay: 2s;
 }
 
 .cube-four {
-    right: 1%;
-    bottom: 7%;
-    width: 28px;
-    height: 28px;
+    right: 4%;
+    bottom: 12%;
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
     animation-delay: 3s;
 }
 
@@ -855,17 +968,24 @@ left, right = st.columns(2, gap="large")
 
 with left:
 
+
     st.markdown("""
-    <div class="card">
-
-    <div class="card-title">
-    📄 Resume Upload
+    <div class="resume-visual">
+        <div class="resume-card-3d"></div>
+        <div class="upload-cloud">☁️</div>
     </div>
 
-    <div class="card-description">
-    Upload the candidate's resume in PDF format.
-    </div>
-
+    <div style="
+        text-align:center;
+        color:#b8c8ff;
+        font-size:15px;
+        margin-bottom:12px;
+    ">
+        Upload your resume
+        <br>
+        <span style="font-size:12px;color:#7785ad;">
+            PDF format supported
+        </span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -883,26 +1003,33 @@ with left:
         else:
             st.success(f"✓ {len(uploaded_files)} resume(s) uploaded")
 
-
 with right:
 
+    
+
     st.markdown("""
-    <div class="card">
-
-    <div class="card-title">
-    💼 Job Requirements
+    <div class="job-visual">
+        <div class="job-board"></div>
+        <div class="job-icon">💼</div>
     </div>
 
-    <div class="card-description">
-    Enter the skills and requirements for the job.
-    </div>
-
+    <div style="
+        text-align:center;
+        color:#b8c8ff;
+        font-size:15px;
+        margin-bottom:12px;
+    ">
+        Define job requirements
+        <br>
+        <span style="font-size:12px;color:#7785ad;">
+            Skills • Experience • Technologies
+        </span>
     </div>
     """, unsafe_allow_html=True)
 
     job_description = st.text_area(
         "Job Description",
-        height=160,
+        height=100,
         placeholder=(
             "Example:\n"
             "Python developer with Machine Learning, SQL, "
@@ -910,6 +1037,7 @@ with right:
         ),
         label_visibility="collapsed"
     )
+
 
 
 st.write("")
