@@ -31,7 +31,16 @@ st.markdown("""
     color: white;
 }
 
-/* Remove Streamlit top line */
+/* Hide Streamlit Cloud top header */
+[data-testid="stHeader"] {
+    display: none !important;
+}
+
+[data-testid="stToolbar"] {
+    display: none !important;
+}
+
+/* Remove Streamlit decoration */
 [data-testid="stDecoration"] {
     display: none !important;
 }
