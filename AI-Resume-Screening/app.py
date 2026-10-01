@@ -40,7 +40,21 @@ st.markdown("""
 
 .header {
     text-align: center;
-    padding: 20px 10px 5px;
+    padding: 15px 10px 8px;
+
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+
+    z-index: 999999;
+
+    background: rgba(5, 8, 25, 0.96);
+    backdrop-filter: blur(15px);
+    -webkit-backdrop-filter: blur(15px);
+
+    box-sizing: border-box;
+    
 }
 
 .header-title {
