@@ -31,6 +31,11 @@ st.markdown("""
     color: white;
 }
 
+/* Remove Streamlit top line */
+[data-testid="stDecoration"] {
+    display: none !important;
+}
+
 .block-container {
     max-width: 1250px;
     padding-top: 35px;
