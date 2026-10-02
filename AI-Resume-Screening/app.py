@@ -1,8 +1,9 @@
+
 import streamlit as st
 from pypdf import PdfReader
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-
+import re
+from sentence_transformers import SentenceTransformer, util
+bert_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 # =========================================================
 # PAGE SETUP
@@ -1079,27 +1080,24 @@ def calculate_match(resume_text, job_text):
     resume_lower = resume_text.lower()
     job_lower = job_text.lower()
 
-
     # =====================================================
-    # 1. TF-IDF SIMILARITY
+    # 1. BERT SEMANTIC SIMILARITY
     # =====================================================
 
-    documents = [
-        resume_lower,
-        job_lower
-    ]
-
-    vectorizer = TfidfVectorizer(
-        stop_words="english"
+    resume_embedding = bert_model.encode(
+        resume_text,
+        convert_to_tensor=True
     )
 
-    vectors = vectorizer.fit_transform(documents)
+    job_embedding = bert_model.encode(
+        job_text,
+        convert_to_tensor=True
+    )
 
-    tfidf_similarity = cosine_similarity(
-        vectors[0:1],
-        vectors[1:2]
-    )[0][0] * 100
-
+    bert_similarity = util.cos_sim(
+        resume_embedding,
+        job_embedding
+    ).item() * 100
 
     # =====================================================
     # 2. SKILL MATCHING
@@ -1137,28 +1135,26 @@ def calculate_match(resume_text, job_text):
         "tableau"
     ]
 
-
-    # Skills required by the job
     required_skills = []
 
     for skill in skills:
 
-        if skill in job_lower:
+        pattern = r"\b" + re.escape(skill) + r"\b"
+
+        if re.search(pattern, job_lower):
 
             required_skills.append(skill)
 
-
-    # Skills found in resume
     matched_skills = []
 
     for skill in required_skills:
 
-        if skill in resume_lower:
+        pattern = r"\b" + re.escape(skill) + r"\b"
+
+        if re.search(pattern, resume_lower):
 
             matched_skills.append(skill)
 
-
-    # Skill match percentage
     if len(required_skills) > 0:
 
         skill_score = (
@@ -1170,32 +1166,26 @@ def calculate_match(resume_text, job_text):
 
         skill_score = 0
 
-
     # =====================================================
     # 3. FINAL SCORE
     # =====================================================
 
     if len(required_skills) > 0:
 
-        # Skill-first scoring:
-        # Actual required skills are more important than wording similarity.
         final_score = (
             (skill_score * 0.85)
             +
-            (tfidf_similarity * 0.15)
+            (bert_similarity * 0.15)
         )
 
     else:
 
-        # If no recognized skills are entered,
-        # use TF-IDF only.
-        final_score = tfidf_similarity
-
+        final_score = bert_similarity
 
     return (
         final_score,
         skill_score,
-        tfidf_similarity,
+        bert_similarity,
         matched_skills,
         required_skills
     )
@@ -1262,7 +1252,7 @@ if analyze:
                             "name": uploaded_file.name,
                             "score": 0.0,
                             "skill_score": 0.0,
-                            "tfidf_score": 0.0,
+                            "bert_score": 0.0,
                             "matched_skills": [],
                             "required_skills": [],
                             "resume_text": "",
@@ -1273,7 +1263,7 @@ if analyze:
                     (
                         score,
                         skill_score,
-                        tfidf_score,
+                        bert_score,
                         matched_skills,
                         required_skills
                     ) = calculate_match(
@@ -1285,7 +1275,7 @@ if analyze:
                         "name": uploaded_file.name,
                         "score": score,
                         "skill_score": skill_score,
-                        "tfidf_score": tfidf_score,
+                        "bert_score": bert_score,
                         "matched_skills": matched_skills,
                         "required_skills": required_skills,
                         "resume_text": resume_text,
@@ -1298,7 +1288,7 @@ if analyze:
                         "name": uploaded_file.name,
                         "score": 0.0,
                         "skill_score": 0.0,
-                        "tfidf_score": 0.0,
+                        "bert_score": 0.0,
                         "matched_skills": [],
                         "required_skills": [],
                         "resume_text": "",
@@ -1399,7 +1389,7 @@ if analyze:
 
                 score = candidate["score"]
                 skill_score = candidate["skill_score"]
-                tfidf_score = candidate["tfidf_score"]
+                bert_score = candidate["bert_score"]
 
                 if score >= SELECTION_THRESHOLD:
                     status = "SELECTED"
@@ -1463,11 +1453,11 @@ if analyze:
                             "Skill Match",
                             f"{skill_score:.2f}%"
                         )
-
                     with c3:
+
                         st.metric(
-                            "TF-IDF Similarity",
-                            f"{tfidf_score:.2f}%"
+                            "BERT Similarity",
+                            f"{bert_score:.2f}%"
                         )
 
 
@@ -1513,7 +1503,8 @@ if analyze:
                         st.info(
                             "No recognized technical skills were detected "
                             "in the job description. The system used "
-                            "TF-IDF similarity."
+                            "BERT semantic similarity."
+
                         )
 
 
@@ -1528,20 +1519,20 @@ if analyze:
                         )
 
                         st.write(
-                            "**1. Skill Matching — 70% weight**  \n"
+                            "**1. Skill Matching — 85% weight**  \n"
                             "Checks whether the technical skills required "
                             "by the job are present in the resume."
                         )
 
                         st.write(
-                            "**2. TF-IDF + Cosine Similarity — 30% weight**  \n"
+                                "**2. BERT Semantic Similarity — 15% weight**  \n"
                             "Measures the similarity between the resume text "
                             "and the job description."
                         )
 
                         st.info(
                             f"Skill Match: {skill_score:.2f}%  |  "
-                            f"TF-IDF Similarity: {tfidf_score:.2f}%  |  "
+                            f"BERT Similarity: {bert_score:.2f}%  |  "
                             f"Final Score: {score:.2f}%"
                         )
 
@@ -1612,7 +1603,7 @@ with f3:
     )
 
     st.caption(
-        "Combines skill matching and TF-IDF similarity."
+        "Combines skill matching and BERT semantic similarity."
     )
 
 
@@ -1642,7 +1633,7 @@ Python
 &nbsp; • &nbsp;
 Machine Learning
 &nbsp; • &nbsp;
-TF-IDF
+BERT Semantic Similarity
 &nbsp; • &nbsp;
 Streamlit
 
@@ -1655,3 +1646,4 @@ Streamlit
 three_d_html = """<div class="three-d-layer"><div class="robot-3d"><div class="robot-head"><div class="robot-face"></div></div><div class="robot-ear-left"></div><div class="robot-ear-right"></div><div class="robot-body"></div><div class="robot-glow"></div></div><div class="resume-3d"><div class="resume-person"></div><div class="resume-line one"></div><div class="resume-line two"></div><div class="resume-line three"></div><div class="resume-magnifier"></div></div><div class="pdf-3d"><div class="pdf-lines"></div><div class="pdf-label">PDF</div></div><div class="target-3d"><div class="target-arrow"></div></div><div class="brain-3d"><div class="brain-platform"></div></div><div class="cube-3d cube-one"></div><div class="cube-3d cube-two"></div><div class="cube-3d cube-three"></div><div class="cube-3d cube-four"></div><div class="neon-line neon-line-one"></div><div class="neon-line neon-line-two"></div><div class="neon-line neon-line-three"></div></div>"""
 
 st.markdown(three_d_html, unsafe_allow_html=True)
+
