@@ -2,8 +2,65 @@
 import streamlit as st
 from pypdf import PdfReader
 import re
+import io
+import joblib
+import csv
+from datetime import datetime
 from sentence_transformers import SentenceTransformer, util
-bert_model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# Optional multilingual utilities. The app still runs if these packages are absent.
+try:
+    from langdetect import detect as detect_language
+except ImportError:
+    detect_language = None
+
+# Local translation is optional and loaded only when the user requests it.
+# Google Translate / deep-translator is intentionally not used.
+
+@st.cache_resource(show_spinner=False)
+def get_translation_pipeline(model_name):
+    from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+
+    return tokenizer, model
+
+
+def translate_text(text, model_name):
+    import torch
+
+    tokenizer, model = get_translation_pipeline(model_name)
+    chunks = [
+        text[i:i + 300]
+        for i in range(0, len(text), 300)
+        if text[i:i + 300].strip()
+    ]
+
+    translated_parts = []
+
+    for chunk in chunks:
+        inputs = tokenizer(
+            chunk,
+            return_tensors="pt",
+            truncation=True,
+            max_length=512
+        )
+
+        with torch.no_grad():
+            output = model.generate(**inputs, max_new_tokens=256)
+
+        translated_parts.append(
+            tokenizer.decode(output[0], skip_special_tokens=True)
+        )
+
+    return "\n".join(translated_parts)
+
+@st.cache_resource
+def get_bert_model():
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+bert_model = get_bert_model()
 
 # =========================================================
 # PAGE SETUP
@@ -1044,7 +1101,23 @@ with right:
 st.write("")
 st.write("")
 
+# =========================================================
+# TRAINED RESUME CATEGORY MODEL
+# =========================================================
 
+from pathlib import Path
+
+@st.cache_resource
+def load_resume_category_model():
+    model_path = Path(__file__).parent / "resume_category_model.pkl"
+
+    if model_path.exists():
+        return joblib.load(model_path)
+
+    return None
+
+
+resume_category_model = load_resume_category_model()
 # =========================================================
 # PDF READER
 # =========================================================
@@ -1246,7 +1319,31 @@ if analyze:
                     resume_text = extract_resume_text(
                         uploaded_file
                     )
+                                        # Predict resume category
+                    predicted_category = "Not available"
 
+                    if resume_category_model is not None:
+                        try:
+                            cleaned_resume = re.sub(
+                                r"\s+",
+                                " ",
+                                re.sub(
+                                    r"[^a-zA-Z\s]",
+                                    " ",
+                                    resume_text.lower()
+                                )
+                            ).strip()
+
+                            if cleaned_resume:
+                                predicted_category = (
+                                    resume_category_model.predict(
+                                        [cleaned_resume]
+                                    )[0]
+                                )
+
+                        except Exception:
+                            predicted_category = "Prediction unavailable"
+                    
                     if not resume_text.strip():
                         candidate_results.append({
                             "name": uploaded_file.name,
@@ -1273,6 +1370,7 @@ if analyze:
 
                     candidate_results.append({
                         "name": uploaded_file.name,
+                        "predicted_category": str(predicted_category),
                         "score": score,
                         "skill_score": skill_score,
                         "bert_score": bert_score,
@@ -1302,6 +1400,9 @@ if analyze:
                 reverse=True
             )
 
+            # Keep results available to the add-on tools after Streamlit reruns.
+            st.session_state["candidate_results"] = candidate_results
+            st.session_state["job_description"] = job_description
 
             st.divider()
 
@@ -1620,6 +1721,612 @@ with f4:
     )
 
 
+
+
+# =========================================================
+# ADVANCED AI FEATURES / ADD-ONS
+# =========================================================
+
+# Results are stored in session state so add-on tools remain available
+# after Streamlit reruns.
+candidate_results = st.session_state.get("candidate_results", [])
+saved_job_description = st.session_state.get("job_description", job_description or "")
+
+# =========================================================
+# DASHBOARD + DOWNLOADABLE REPORTS
+# =========================================================
+st.markdown("<h2 style='text-align:center;'>Screening Dashboard</h2>", unsafe_allow_html=True)
+if not candidate_results:
+    st.info("Upload candidate PDF resumes and click ANALYZE ALL RESUMES to populate the dashboard and report downloads.")
+else:
+    valid_results = [c for c in candidate_results if not c.get("error")]
+    total_candidates = len(candidate_results)
+    analyzed_count = len(valid_results)
+    selected_count = sum(1 for c in valid_results if float(c.get("score", 0) or 0) >= SELECTION_THRESHOLD)
+    average_score = (sum(float(c.get("score", 0) or 0) for c in valid_results) / analyzed_count) if analyzed_count else 0.0
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("Resumes uploaded", total_candidates)
+    d2.metric("Successfully analyzed", analyzed_count)
+    d3.metric("Above threshold", selected_count)
+    d4.metric("Average match score", f"{average_score:.1f}%")
+
+    st.subheader("Download screening report")
+    st.caption("Exports contain candidate file names and automated match metrics. Review results manually before making hiring decisions.")
+    report_rows = []
+    for rank, candidate in enumerate(candidate_results, start=1):
+        score = float(candidate.get("score", 0) or 0)
+        report_rows.append({
+            "Rank": rank,
+            "Candidate": candidate.get("name", "Unknown"),
+            "Predicted Category": candidate.get("predicted_category", "Not available"),
+            "Match Score (%)": round(score, 2),
+            "Skill Score (%)": round(float(candidate.get("skill_score", 0) or 0), 2),
+            "Semantic Similarity (%)": round(float(candidate.get("bert_score", 0) or 0), 2),
+            "Status": "Above threshold" if score >= SELECTION_THRESHOLD and not candidate.get("error") else "Review / below threshold",
+            "Matched Skills": ", ".join(candidate.get("matched_skills", []) or []),
+            "Missing Required Skills": ", ".join([x for x in (candidate.get("required_skills", []) or []) if x not in (candidate.get("matched_skills", []) or [])]),
+            "Processing Note": candidate.get("error", "") or ""
+        })
+        
+    st.subheader("🤖 ML-Predicted Resume Categories")
+
+    category_rows = []
+
+    for candidate in candidate_results:
+        category_rows.append({
+            "Candidate": candidate.get("name", "Unknown"),
+            "Predicted Category": candidate.get(
+                "predicted_category", "Unavailable"
+            )
+        })
+
+    st.dataframe(
+        category_rows,
+        use_container_width=True,
+        hide_index=True
+    )        
+    csv_buffer = io.StringIO()
+    csv_writer = csv.DictWriter(csv_buffer, fieldnames=list(report_rows[0].keys()))
+    csv_writer.writeheader()
+    csv_writer.writerows(report_rows)
+    report_stamp = datetime.now().strftime("%Y%m%d_%H%M")
+    dl1, dl2, dl3 = st.columns(3)
+    with dl1:
+        st.download_button("Download CSV", data=csv_buffer.getvalue().encode("utf-8-sig"), file_name=f"resume_screening_{report_stamp}.csv", mime="text/csv", use_container_width=True)
+    with dl2:
+        text_report = ["AI RESUME SCREENING REPORT", f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", f"Threshold: {SELECTION_THRESHOLD}%", "", "Note: Automated scores are decision-support signals, not hiring decisions.", ""]
+        for row in report_rows:
+            text_report.extend([f"{row['Rank']}. {row['Candidate']}", f"   Match: {row['Match Score (%)']}% | Skills: {row['Skill Score (%)']}% | Similarity: {row['Semantic Similarity (%)']}%", f"   Status: {row['Status']}", f"   Matched skills: {row['Matched Skills']}", f"   Missing skills: {row['Missing Required Skills']}", f"   Note: {row['Processing Note']}", ""])
+        st.download_button("Download TXT report", data="\n".join(text_report).encode("utf-8"), file_name=f"resume_screening_{report_stamp}.txt", mime="text/plain", use_container_width=True)
+    with dl3:
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+            from reportlab.lib import colors
+            from reportlab.lib.styles import getSampleStyleSheet
+            pdf_buffer = io.BytesIO()
+            doc = SimpleDocTemplate(pdf_buffer, pagesize=A4, title="AI Resume Screening Report")
+            styles = getSampleStyleSheet()
+            story = [Paragraph("AI Resume Screening Report", styles["Title"]), Spacer(1, 8), Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Threshold: {SELECTION_THRESHOLD}%", styles["Normal"]), Spacer(1, 12), Paragraph("Automated scores are decision-support signals. Review candidates manually before hiring decisions.", styles["Normal"]), Spacer(1, 12)]
+            table_data = [["Rank", "Candidate", "Match", "Skills", "Status"]]
+            for row in report_rows:
+                safe_name = str(row["Candidate"]).encode("latin-1", "replace").decode("latin-1")
+                table_data.append([str(row["Rank"]), safe_name[:35], f"{row['Match Score (%)']}%", f"{row['Skill Score (%)']}%", row["Status"]])
+            table = Table(table_data, repeatRows=1, colWidths=[35, 190, 60, 60, 110])
+            table.setStyle(TableStyle([("BACKGROUND", (0,0), (-1,0), colors.HexColor("#29245c")), ("TEXTCOLOR", (0,0), (-1,0), colors.white), ("GRID", (0,0), (-1,-1), 0.4, colors.grey), ("VALIGN", (0,0), (-1,-1), "TOP"), ("FONTSIZE", (0,0), (-1,-1), 8), ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#f1f2f8")])]))
+            story.append(table)
+            doc.build(story)
+            st.download_button("Download PDF report", data=pdf_buffer.getvalue(), file_name=f"resume_screening_{report_stamp}.pdf", mime="application/pdf", use_container_width=True)
+        except Exception as exc:
+            st.warning("PDF export is unavailable in this environment. Use CSV or TXT report instead.")
+
+st.divider()
+st.markdown(
+    "<h2 style='text-align:center;'>Advanced Screening Toolkit</h2>",
+    unsafe_allow_html=True
+)
+st.caption(
+    "Prototype tools for recruiter assistance. Scores and flags are decision-support "
+    "signals, not automatic proof of candidate ability, honesty, or suitability."
+)
+
+addon_tabs = st.tabs([
+    "⚖️ Custom Rubric",
+    "🌐 Multilingual",
+    "💬 AI Interview",
+    "📝 Resume Coach",
+    "🛡️ Integrity Checks",
+    "📨 Candidate Messages",
+    "🤝 Communication Skills",
+])
+
+with addon_tabs[0]:
+    st.subheader("Custom, role-specific scoring")
+    st.write(
+        "Adjust the weights for each candidate. Experience, education, and coding "
+        "scores must be entered by a recruiter from verified, job-related evidence."
+    )
+    if not candidate_results:
+        st.info("Upload resumes and click ANALYZE ALL RESUMES first.")
+    else:
+        names = [c["name"] for c in candidate_results]
+        selected_name = st.selectbox(
+            "Choose a candidate for rubric scoring",
+            names,
+            key="rubric_candidate"
+        )
+        selected_candidate = next(c for c in candidate_results if c["name"] == selected_name)
+
+        rw1, rw2 = st.columns(2)
+        with rw1:
+            w_skills = st.slider("Skills match weight (%)", 0, 100, 50, key="rubric_w_skills")
+            w_experience = st.slider("Relevant experience weight (%)", 0, 100, 20, key="rubric_w_experience")
+        with rw2:
+            w_education = st.slider("Required education/certification weight (%)", 0, 100, 10, key="rubric_w_education")
+            w_coding = st.slider("Coding/work-sample test weight (%)", 0, 100, 20, key="rubric_w_coding")
+
+        weight_sum = w_skills + w_experience + w_education + w_coding
+        st.write(f"**Weight total:** {weight_sum}% (weights are normalized automatically)")
+        if weight_sum == 0:
+            st.warning("At least one weight must be greater than zero.")
+        else:
+            st.caption("Enter scores from evidence; leave unassessed categories at 0 weight if not applicable.")
+            score_key = re.sub(r"[^a-zA-Z0-9]+", "_", selected_name)
+            e1, e2, e3 = st.columns(3)
+            with e1:
+                experience_score = st.slider(
+                    "Experience evidence score", 0, 100, 50,
+                    key=f"exp_score_{score_key}"
+                )
+            with e2:
+                education_score = st.slider(
+                    "Education/certification score", 0, 100, 50,
+                    key=f"edu_score_{score_key}"
+                )
+            with e3:
+                coding_score = st.slider(
+                    "Coding/work-sample score", 0, 100, 50,
+                    key=f"coding_score_{score_key}"
+                )
+
+            components = [
+                (selected_candidate.get("skill_score", 0), w_skills),
+                (experience_score, w_experience),
+                (education_score, w_education),
+                (coding_score, w_coding),
+            ]
+            custom_score = sum(float(value) * weight for value, weight in components) / weight_sum
+            st.metric("Custom rubric score", f"{custom_score:.2f}/100")
+            st.progress(max(0.0, min(custom_score / 100, 1.0)))
+            st.info(
+                "This is a separate rubric score and does not overwrite the original AI match score. "
+                "Review the evidence and apply the same rubric consistently to all candidates."
+            )
+
+
+with addon_tabs[1]:
+    st.subheader("🌐 Multilingual Resume Screening")
+
+    if not candidate_results:
+        st.info("Analyze resumes first to use multilingual tools.")
+    else:
+        names = [c["name"] for c in candidate_results]
+        selected_name = st.selectbox(
+            "Choose resume", names, key="language_candidate"
+        )
+        candidate = next(
+            c for c in candidate_results if c["name"] == selected_name
+        )
+        resume_text = candidate.get("resume_text", "")
+
+        if not resume_text.strip():
+            st.warning("No readable text was extracted from this PDF.")
+        else:
+            st.text_area(
+                "Original resume preview",
+                resume_text[:4000],
+                height=180,
+                key="multilingual_original"
+            )
+
+            if detect_language is not None:
+                try:
+                    detected = detect_language(resume_text[:3000])
+                    st.success(f"Detected language: {detected}")
+                except Exception:
+                    st.info("Language detection was inconclusive.")
+
+            languages = {
+                "English": "en",
+                "Hindi": "hi",
+                "Spanish": "es",
+                "French": "fr"
+            }
+
+            translation_models = {
+                ("en", "hi"): "Helsinki-NLP/opus-mt-en-hi",
+                ("hi", "en"): "Helsinki-NLP/opus-mt-hi-en",
+                ("en", "es"): "Helsinki-NLP/opus-mt-en-es",
+                ("es", "en"): "Helsinki-NLP/opus-mt-es-en",
+                ("en", "fr"): "Helsinki-NLP/opus-mt-en-fr",
+                ("fr", "en"): "Helsinki-NLP/opus-mt-fr-en",
+            }
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                source = st.selectbox(
+                    "Resume language",
+                    list(languages.keys()),
+                    key="translation_source"
+                )
+
+            with col2:
+                target = st.selectbox(
+                    "Translate into",
+                    [lang for lang in languages if lang != source],
+                    key="translation_target"
+                )
+
+            model_name = translation_models.get(
+                (languages[source], languages[target])
+            )
+
+            st.caption(
+                "Choose the language the resume is actually written in. "
+                "The translation model downloads on first use."
+            )
+
+            if st.button("Translate full resume", key="translate_resume"):
+                try:
+                    with st.spinner("Loading model and translating resume..."):
+                        translated = translate_text(resume_text, model_name)
+
+                    if translated.strip():
+                        st.text_area(
+                            f"Translation — {target}",
+                            translated,
+                            height=300,
+                            key="translated_resume_output"
+                        )
+                        st.download_button(
+                            "Download translated resume",
+                            data=translated.encode("utf-8"),
+                            file_name="translated_resume.txt",
+                            mime="text/plain",
+                            key="download_translation"
+                        )
+                    else:
+                        st.warning("The model returned empty text.")
+
+                except Exception as exc:
+                    st.error(
+                        "Translation failed. Check internet access, "
+                        "installed dependencies, and model availability."
+                    )
+                    st.caption(str(exc))
+
+            st.caption(
+                "Translation may not be perfect. Verify names, dates, "
+                "qualifications, and technical terms manually."
+            )
+
+
+
+with addon_tabs[2]:
+    st.subheader("AI Interview / Voice Prototype")
+
+    st.write(
+        "Choose a suggested question or write your own question. "
+        "Enter the candidate's answer to get a preliminary coverage score."
+    )
+
+    interview_questions = [
+        "Describe a relevant project you worked on and your individual contribution.",
+        "How would you approach a difficult problem related to this role?",
+        "Which tools or technologies from the job description have you used, and how?",
+    ]
+
+    st.markdown("**Suggested questions**")
+    for i, question in enumerate(interview_questions, 1):
+        st.write(f"{i}. {question}")
+
+    if candidate_results:
+        interview_name = st.selectbox(
+            "Candidate for interview",
+            [c["name"] for c in candidate_results],
+            key="interview_candidate"
+        )
+
+        question_mode = st.radio(
+            "Choose question source",
+            ["Suggested question", "Write my own question"],
+            horizontal=True,
+            key="interview_question_mode"
+        )
+
+        if question_mode == "Suggested question":
+            interview_question = st.selectbox(
+                "Select interview question",
+                interview_questions,
+                key="interview_question"
+            )
+        else:
+            interview_question = st.text_area(
+                "Type your own interview question",
+                key="custom_interview_question",
+                placeholder="Example: Explain how you used Python in your project.",
+                height=100
+            )
+
+        st.markdown("**Selected interview question**")
+        if interview_question.strip():
+            st.info(interview_question)
+        else:
+            st.warning("Please enter an interview question.")
+
+        interview_answer = st.text_area(
+            "Candidate answer",
+            height=160,
+            key="interview_answer",
+            placeholder="Type or paste the candidate's answer here..."
+        )
+
+        if st.button("Evaluate answer", key="evaluate_interview"):
+            if not interview_question.strip():
+                st.warning("Please select or type an interview question.")
+            elif not interview_answer.strip():
+                st.warning("Please enter the candidate's answer.")
+            else:
+                answer_words = re.findall(
+                    r"\b\w+\b", interview_answer.lower()
+                )
+
+                job_terms = set(re.findall(
+                    r"\b[a-zA-Z][a-zA-Z+#.-]{2,}\b",
+                    saved_job_description.lower()
+                ))
+
+                answer_terms = set(answer_words)
+                relevant_terms = answer_terms.intersection(job_terms)
+
+                length_score = min(len(answer_words) / 80, 1) * 40
+                relevance_score = min(
+                    len(relevant_terms) / max(len(job_terms), 1) * 8,
+                    40
+                )
+
+                structure_score = (
+                    20 if any(token in interview_answer.lower() for token in [
+                        "because", "result", "built", "developed",
+                        "improved", "learned", "implemented", "created"
+                    ]) else 8
+                )
+
+                indicator = min(
+                    100, length_score + relevance_score + structure_score
+                )
+
+                st.metric(
+                    "Preliminary answer coverage indicator",
+                    f"{indicator:.0f}/100"
+                )
+
+                st.markdown("**Question asked**")
+                st.write(interview_question)
+
+                st.markdown("**Candidate answer**")
+                st.write(interview_answer)
+
+                st.markdown("**Potential job-description terms mentioned**")
+                st.write(
+                    ", ".join(sorted(relevant_terms))
+                    if relevant_terms else "No matching terms detected."
+                )
+
+                st.caption(
+                    "This is a rule-based indicator, not an AI judgment of "
+                    "answer quality. Recruiters should assess correctness, "
+                    "reasoning, examples, and context themselves."
+                )
+
+    else:
+        st.info(
+            "Analyze resumes first to associate interview questions with a candidate."
+        )
+
+    st.markdown("---")
+    st.markdown("**Optional voice capture**")
+
+    if hasattr(st, "audio_input"):
+        audio_recording = st.audio_input(
+            "Record a short answer (if supported by your browser)"
+        )
+
+        if audio_recording is not None:
+            st.audio(audio_recording)
+            st.info(
+                "Audio is captured for this session. Automatic speech "
+                "transcription is not configured yet. You can type the "
+                "transcribed answer in the Candidate answer box."
+            )
+    else:
+        st.caption(
+            "Audio recording is not supported by this Streamlit version. "
+            "Use typed answers instead."
+        )
+
+with addon_tabs[3]:
+    st.subheader("Resume improvement coach")
+    st.write(
+        "Finds job-description terms missing from the resume and suggests clearer wording. "
+        "Suggestions must not add achievements, skills, or experience that the candidate has not confirmed."
+    )
+    if not candidate_results:
+        st.info("Analyze resumes first to use the resume coach.")
+    else:
+        coach_name = st.selectbox(
+            "Choose candidate resume", [c["name"] for c in candidate_results], key="coach_candidate"
+        )
+        coach_candidate = next(c for c in candidate_results if c["name"] == coach_name)
+        coach_text = coach_candidate.get("resume_text", "")
+        required = coach_candidate.get("required_skills", [])
+        matched = coach_candidate.get("matched_skills", [])
+        missing = [skill for skill in required if skill not in matched]
+
+        st.write("**Potential keyword gaps**")
+        if missing:
+            st.write(", ".join(skill.title() for skill in missing))
+            st.caption("Only add a keyword if it truthfully describes the candidate's experience.")
+        else:
+            st.success("No gaps found among the skills recognized by the current keyword list.")
+
+        st.write("**Bullet-point improvement template**")
+        st.code(
+            "Action verb + task/project + tool or method + measurable result\n"
+            "Example template: Developed [what] using [tool/method], resulting in [verified outcome].",
+            language="text"
+        )
+        if st.button("Create safe rewrite suggestions", key="rewrite_suggestions"):
+            lines = [line.strip(" •\t-") for line in coach_text.splitlines() if len(line.strip()) > 25]
+            lines = lines[:5]
+            if lines:
+                for line in lines:
+                    st.write(f"• Consider rewriting this verified detail more clearly: “{line[:220]}”")
+                    st.caption("Template: Action + task + method/tool + result (add only verified facts).")
+            else:
+                st.warning("No clear bullet points were extracted. Review the PDF text manually.")
+        st.text_area(
+            "Candidate-edited bullet point (optional)",
+            height=100,
+            key="candidate_bullet_edit",
+            placeholder="Write a truthful bullet point using your actual experience."
+        )
+
+with addon_tabs[4]:
+    st.subheader("Resume integrity review flags")
+    st.write(
+        "These checks highlight items for verification; they do not determine whether a resume is fraudulent "
+        "or AI-generated."
+    )
+    if not candidate_results:
+        st.info("Analyze resumes first to run integrity checks.")
+    else:
+        integrity_name = st.selectbox(
+            "Choose resume", [c["name"] for c in candidate_results], key="integrity_candidate"
+        )
+        integrity_candidate = next(c for c in candidate_results if c["name"] == integrity_name)
+        integrity_text = integrity_candidate.get("resume_text", "")
+        words = re.findall(r"\b[a-zA-Z0-9+#.-]+\b", integrity_text.lower())
+        normalized_lines = [
+            re.sub(r"\s+", " ", line.strip().lower())
+            for line in integrity_text.splitlines() if len(line.strip()) > 35
+        ]
+        duplicate_lines = sorted({line for line in normalized_lines if normalized_lines.count(line) > 1})
+        date_patterns = re.findall(
+            r"\b(?:19|20)\d{2}\b", integrity_text
+        )
+        flags = []
+        if duplicate_lines:
+            flags.append(f"{len(duplicate_lines)} repeated long line(s) detected in the extracted text.")
+        if len(words) < 80:
+            flags.append("Very little text was extracted; this may be a scanned/image-based or short resume.")
+        if len(date_patterns) >= 2 and len(date_patterns) != len(set(date_patterns)):
+            flags.append("Some years repeat. Repeated years can be normal; verify chronology only if relevant.")
+        if flags:
+            for flag in flags:
+                st.warning(flag)
+        else:
+            st.success("No basic text-integrity flags were found by these limited checks.")
+        st.caption(
+            "Do not label a candidate dishonest based on these flags. Verify qualifications, employment, "
+            "and work samples through consistent, consented procedures. AI-writing detectors are unreliable."
+        )
+
+with addon_tabs[5]:
+    st.subheader("Candidate engagement message drafts")
+    st.write("Prepare a personalized message. This tool drafts text only; it does not send emails or messages.")
+    if candidate_results:
+        message_name = st.selectbox(
+            "Candidate", [c["name"] for c in candidate_results], key="message_candidate"
+        )
+        message_status = st.selectbox(
+            "Status", ["Shortlisted", "Further review", "Not shortlisted", "Interview invitation"],
+            key="message_status"
+        )
+        recruiter_name = st.text_input("Recruiter/team name", value="Recruitment Team", key="recruiter_name")
+        role_name = st.text_input("Role title", value="the advertised role", key="role_title")
+        if st.button("Generate message draft", key="generate_candidate_message"):
+            safe_candidate_name = message_name.rsplit(".", 1)[0].replace("_", " ").replace("-", " ")
+            message_templates = {
+                "Shortlisted": (
+                    f"Hello {safe_candidate_name},\n\nThank you for applying for {role_name}. "
+                    "Your application has been shortlisted for the next stage. Our team will share "
+                    "the next steps after a recruiter review.\n\nRegards,\n{team}"
+                ),
+                "Further review": (
+                    f"Hello {safe_candidate_name},\n\nThank you for applying for {role_name}. "
+                    "Your application is under review. We will update you when the review is complete.\n\n"
+                    "Regards,\n{team}"
+                ),
+                "Not shortlisted": (
+                    f"Hello {safe_candidate_name},\n\nThank you for your interest in {role_name} and for "
+                    "taking the time to apply. We will not be progressing your application at this stage. "
+                    "We appreciate your interest and wish you well.\n\nRegards,\n{team}"
+                ),
+                "Interview invitation": (
+                    f"Hello {safe_candidate_name},\n\nWe would like to invite you to an initial interview "
+                    f"for {role_name}. Please reply to the recruiter to coordinate a suitable time.\n\n"
+                    "Regards,\n{team}"
+                ),
+            }
+            draft = message_templates[message_status].replace("{team}", recruiter_name)
+            st.text_area("Editable message draft", draft, height=200, key="candidate_message_draft")
+            st.caption("Review names, role details, and status before sending.")
+
+with addon_tabs[6]:
+    st.subheader("Job-related communication assessment")
+    st.write(
+        "Use a written, job-relevant sample to review clarity and structure. This does not infer personality, "
+        "emotion, honesty, or culture fit from voice, accent, face, or micro-expressions."
+    )
+    sample_response = st.text_area(
+        "Paste a candidate's job-related written response",
+        height=150,
+        key="soft_skills_response",
+        placeholder="Paste a response to a role-related question..."
+    )
+    if st.button("Review communication structure", key="review_communication"):
+        if not sample_response.strip():
+            st.warning("Paste a response first.")
+        else:
+            response_words = re.findall(r"\b\w+\b", sample_response)
+            sentences = [s for s in re.split(r"[.!?]+", sample_response) if s.strip()]
+            word_count = len(response_words)
+            sentence_count = len(sentences)
+            average_sentence = word_count / max(sentence_count, 1)
+            clarity_indicator = 100
+            if word_count < 25:
+                clarity_indicator -= 25
+            if sentence_count == 0:
+                clarity_indicator -= 25
+            if average_sentence > 35:
+                clarity_indicator -= 15
+            if not any(word in sample_response.lower() for word in
+                       ["because", "for example", "therefore", "result", "first", "then"]):
+                clarity_indicator -= 10
+            st.metric("Writing structure indicator", f"{max(0, clarity_indicator)}/100")
+            st.write(f"Word count: {word_count} · Sentence count: {sentence_count}")
+            st.write("**Human-review prompts**")
+            st.write("- Is the answer relevant to the question?")
+            st.write("- Are claims specific and supported with examples?")
+            st.write("- Is the explanation understandable for the role?")
+            st.caption(
+                "This is a simple writing-structure heuristic, not a validated soft-skills or personality test. "
+                "Provide reasonable accommodations and assess candidates consistently."
+            )
+
+
 # =========================================================
 # FOOTER
 # =========================================================
@@ -1646,4 +2353,3 @@ Streamlit
 three_d_html = """<div class="three-d-layer"><div class="robot-3d"><div class="robot-head"><div class="robot-face"></div></div><div class="robot-ear-left"></div><div class="robot-ear-right"></div><div class="robot-body"></div><div class="robot-glow"></div></div><div class="resume-3d"><div class="resume-person"></div><div class="resume-line one"></div><div class="resume-line two"></div><div class="resume-line three"></div><div class="resume-magnifier"></div></div><div class="pdf-3d"><div class="pdf-lines"></div><div class="pdf-label">PDF</div></div><div class="target-3d"><div class="target-arrow"></div></div><div class="brain-3d"><div class="brain-platform"></div></div><div class="cube-3d cube-one"></div><div class="cube-3d cube-two"></div><div class="cube-3d cube-three"></div><div class="cube-3d cube-four"></div><div class="neon-line neon-line-one"></div><div class="neon-line neon-line-two"></div><div class="neon-line neon-line-three"></div></div>"""
 
 st.markdown(three_d_html, unsafe_allow_html=True)
-
