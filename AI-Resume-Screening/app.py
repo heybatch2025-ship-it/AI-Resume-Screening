@@ -1104,6 +1104,8 @@ st.write("")
 # =========================================================
 # TRAINED RESUME CATEGORY MODEL
 # =========================================================
+
+
 from pathlib import Path
 
 @st.cache_resource
@@ -1126,9 +1128,6 @@ if model_load_error:
 else:
     st.success("Resume category model loaded successfully!")
 
-
-
-resume_category_model = load_resume_category_model()
 # =========================================================
 # PDF READER
 # =========================================================
@@ -1352,10 +1351,8 @@ if analyze:
                                     )[0]
                                 )
 
-                       
-except Exception as e:
-    predicted_category = f"Error: {type(e).__name__}: {e}"
-
+                        except Exception:
+                            predicted_category = "Prediction unavailable"
                     
                     if not resume_text.strip():
                         candidate_results.append({
