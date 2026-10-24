@@ -1352,8 +1352,10 @@ if analyze:
                                     )[0]
                                 )
 
-                        except Exception:
-                            predicted_category = "Prediction unavailable"
+                       
+except Exception as e:
+    predicted_category = f"Error: {type(e).__name__}: {e}"
+
                     
                     if not resume_text.strip():
                         candidate_results.append({
