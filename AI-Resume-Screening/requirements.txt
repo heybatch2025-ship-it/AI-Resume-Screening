@@ -1,6 +1,11 @@
-streamlit
+streamlit>=1.40,<2.0
 pypdf
 sentence-transformers
 torch
 pandas
 reportlab
+openpyxl
+langdetect
+transformers>=4.38.0,<5.0.0
+sentencepiece
+joblib
