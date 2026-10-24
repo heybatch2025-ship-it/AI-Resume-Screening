@@ -1104,17 +1104,28 @@ st.write("")
 # =========================================================
 # TRAINED RESUME CATEGORY MODEL
 # =========================================================
-
 from pathlib import Path
 
 @st.cache_resource
 def load_resume_category_model():
     model_path = Path(__file__).parent / "resume_category_model.pkl"
 
-    if model_path.exists():
-        return joblib.load(model_path)
+    if not model_path.is_file():
+        return None, f"File not found: {model_path}"
 
-    return None
+    try:
+        model = joblib.load(model_path)
+        return model, None
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
+
+resume_category_model, model_load_error = load_resume_category_model()
+
+if model_load_error:
+    st.error(f"Resume category model issue: {model_load_error}")
+else:
+    st.success("Resume category model loaded successfully!")
+
 
 
 resume_category_model = load_resume_category_model()
