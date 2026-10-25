@@ -1848,6 +1848,7 @@ addon_tabs = st.tabs([
     "🛡️ Integrity Checks",
     "📨 Candidate Messages",
     "🤝 Communication Skills",
+    "🧭 Behavioral & Values",
 ])
 
 with addon_tabs[0]:
@@ -2335,6 +2336,226 @@ with addon_tabs[6]:
                 "This is a simple writing-structure heuristic, not a validated soft-skills or personality test. "
                 "Provide reasonable accommodations and assess candidates consistently."
             )
+
+
+
+with addon_tabs[7]:
+    st.subheader("Behavioral & Values Insights")
+    st.write(
+        "Review job-related examples against a consistent rubric. This module does not diagnose "
+        "personality or infer honesty, emotion, values, or suitability from a person's face, voice, "
+        "accent, eye contact, or other nonverbal signals."
+    )
+
+    if not candidate_results:
+        st.info("Analyze resumes first to associate your review notes with a candidate.")
+        behavior_candidate_name = None
+    else:
+        behavior_candidate_name = st.selectbox(
+            "Candidate for behavioral review",
+            [c.get("name", "Unknown") for c in candidate_results],
+            key="behavior_candidate_name"
+        )
+
+    st.markdown("#### 1. Written behavioral answer")
+    st.caption(
+        "Ask every candidate the same job-related question where practical. Example: "
+        "'Describe a time you handled a disagreement in a team. What did you do and what happened?'"
+    )
+    behavior_question = st.text_area(
+        "Interview question",
+        value="Describe a time you handled a disagreement in a team. What did you do and what happened?",
+        key="behavior_question",
+        height=85
+    )
+    behavior_answer = st.text_area(
+        "Candidate's written answer or transcript (paste manually)",
+        key="behavior_answer",
+        height=180,
+        placeholder="Paste the answer here. Do not include unnecessary sensitive personal information."
+    )
+
+    if st.button("Review answer evidence", key="review_behavior_answer"):
+        if not behavior_question.strip() or not behavior_answer.strip():
+            st.warning("Enter both the question and the candidate's answer.")
+        else:
+            answer_lower = behavior_answer.lower()
+            words = re.findall(r"\b[\w'-]+\b", behavior_answer)
+            sentences = [part.strip() for part in re.split(r"[.!?]+", behavior_answer) if part.strip()]
+            action_markers = [
+                "i did", "i asked", "i explained", "i discussed", "i planned",
+                "i created", "i checked", "i worked", "i decided", "i helped",
+                "i changed", "i learned", "i resolved", "i listened", "i proposed"
+            ]
+            result_markers = [
+                "result", "as a result", "finally", "improved", "completed",
+                "achieved", "reduced", "increased", "learned", "we delivered"
+            ]
+            context_markers = [
+                "when", "because", "for example", "the situation", "our team",
+                "the task", "the problem", "my responsibility"
+            ]
+            evidence = {
+                "Context or task mentioned": any(marker in answer_lower for marker in context_markers),
+                "Specific action described": any(marker in answer_lower for marker in action_markers),
+                "Outcome or learning mentioned": any(marker in answer_lower for marker in result_markers),
+                "Concrete example length (30+ words)": len(words) >= 30,
+            }
+            st.markdown("**Evidence checklist (heuristic, not a personality score)**")
+            for label, present in evidence.items():
+                st.write(f"{'✅' if present else '▫️'} {label}")
+            st.write(f"Word count: **{len(words)}** · Sentence count: **{len(sentences)}**")
+            st.write("**Suggested human follow-up questions**")
+            if not evidence["Context or task mentioned"]:
+                st.write("- What was the situation, and what were you responsible for?")
+            if not evidence["Specific action described"]:
+                st.write("- What specific steps did you personally take?")
+            if not evidence["Outcome or learning mentioned"]:
+                st.write("- What happened as a result, and what did you learn?")
+            st.caption(
+                "These indicators only show whether certain evidence markers appear in the text. "
+                "They are not validated measures of behavior, integrity, or future performance."
+            )
+
+    st.divider()
+    st.markdown("#### 2. Values evidence rubric")
+    st.write(
+        "Choose values that are genuinely relevant to this role and score only examples the candidate "
+        "provided. Do not score personal beliefs, identity, background, or perceived similarity to the team."
+    )
+    values_options = [
+        "Accountability",
+        "Collaboration",
+        "Learning and adaptability",
+        "Customer or patient focus",
+        "Safety and responsibility",
+        "Clear communication",
+        "Role-specific value (write below)",
+    ]
+    selected_values = st.multiselect(
+        "Values / work principles to assess",
+        values_options,
+        default=["Accountability", "Collaboration", "Learning and adaptability"],
+        key="behavior_values"
+    )
+    custom_value = st.text_input(
+        "Optional role-specific value",
+        key="behavior_custom_value",
+        placeholder="e.g., careful handling of confidential data"
+    )
+    if custom_value.strip():
+        selected_values = selected_values + [custom_value.strip()]
+
+    value_ratings = {}
+    for idx, value_name in enumerate(selected_values):
+        value_ratings[value_name] = st.select_slider(
+            f"{value_name}: evidence in the answer",
+            options=["Not assessed", "No example yet", "Limited evidence", "Clear example", "Strong specific example"],
+            value="Not assessed",
+            key=f"behavior_value_rating_{idx}_{re.sub(r'[^a-zA-Z0-9]+', '_', value_name)[:30]}"
+        )
+    value_evidence_notes = st.text_area(
+        "Evidence notes (quote or summarize the job-related example)",
+        key="behavior_value_notes",
+        height=110,
+        placeholder="Record the action, context, outcome, and any follow-up needed."
+    )
+
+    st.divider()
+    st.markdown("#### 3. Optional video-assisted human review")
+    st.warning(
+        "Video is for a trained human reviewer only. This app does not analyze facial expressions, "
+        "eye contact, voice, accent, appearance, emotion, or personality. Use the same job-related "
+        "prompts and reasonable accommodations for all candidates."
+    )
+    video_file = st.file_uploader(
+        "Optional interview video for manual review",
+        type=["mp4", "mov", "webm", "m4v"],
+        key="behavior_video_upload",
+        help="Video is held in the current Streamlit session; do not upload without appropriate consent."
+    )
+    if video_file is not None:
+        st.video(video_file)
+        st.caption(
+            "The video is displayed for human review only; no automated face, voice, or emotion analysis is run."
+        )
+
+    review_items = [
+        "Answer addresses the question asked",
+        "Provides a relevant, specific work example",
+        "Explains own actions and responsibilities",
+        "Explains outcome or learning",
+        "Job-related technical/process details are supported",
+        "Follow-up evidence is needed",
+    ]
+    st.markdown("**Human review checklist**")
+    manual_review = {}
+    for idx, item in enumerate(review_items):
+        manual_review[item] = st.selectbox(
+            item,
+            ["Not reviewed", "Evidence observed", "Needs clarification", "Not applicable"],
+            key=f"behavior_video_check_{idx}"
+        )
+    timestamp_note = st.text_input(
+        "Optional timestamp and observation",
+        key="behavior_video_timestamp",
+        placeholder="e.g., 02:15 — candidate explains the steps taken"
+    )
+    reviewer_name = st.text_input("Reviewer initials/name (optional)", key="behavior_reviewer")
+    overall_note = st.text_area(
+        "Overall job-related review notes",
+        key="behavior_overall_notes",
+        height=100
+    )
+
+    if st.button("Build review summary", key="build_behavior_summary"):
+        summary_lines = [
+            "BEHAVIORAL & VALUES REVIEW SUMMARY",
+            f"Candidate: {behavior_candidate_name or 'Not selected'}",
+            f"Review date: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            f"Reviewer: {reviewer_name.strip() or 'Not provided'}",
+            "",
+            "INTERVIEW QUESTION",
+            behavior_question.strip() or "Not provided",
+            "",
+            "WRITTEN ANSWER",
+            behavior_answer.strip() or "Not provided",
+            "",
+            "VALUES RUBRIC",
+        ]
+        if value_ratings:
+            summary_lines.extend([f"- {name}: {rating}" for name, rating in value_ratings.items()])
+        else:
+            summary_lines.append("- No values selected.")
+        summary_lines.extend([
+            f"Evidence notes: {value_evidence_notes.strip() or 'Not provided'}",
+            "",
+            "HUMAN REVIEW CHECKLIST",
+        ])
+        summary_lines.extend([f"- {name}: {rating}" for name, rating in manual_review.items()])
+        summary_lines.extend([
+            f"Timestamp note: {timestamp_note.strip() or 'Not provided'}",
+            f"Overall notes: {overall_note.strip() or 'Not provided'}",
+            "",
+            "LIMITATION: This is a human-review aid, not a validated psychological assessment or an automated hiring decision.",
+            "Do not infer personality, honesty, emotion, or values from facial, vocal, accent, or other nonverbal cues.",
+        ])
+        st.session_state["behavior_review_summary"] = "\n".join(summary_lines)
+
+    if st.session_state.get("behavior_review_summary"):
+        st.text_area(
+            "Generated review summary",
+            value=st.session_state["behavior_review_summary"],
+            height=300,
+            key="behavior_review_summary_display"
+        )
+        st.download_button(
+            "Download review summary (.txt)",
+            data=st.session_state["behavior_review_summary"].encode("utf-8"),
+            file_name="behavioral_values_review.txt",
+            mime="text/plain",
+            key="download_behavior_review"
+        )
 
 
 # =========================================================
