@@ -1152,7 +1152,7 @@ def extract_resume_text(pdf_file):
 # AI MATCHING
 # =========================================================
 
-# A candidate is shortlisted at 50% or above.
+# A candidate is shortlisted at 65% or above.
 # This avoids rejecting candidates who match most of the required skills
 # but use different wording in their resume.
 SELECTION_THRESHOLD = 65
